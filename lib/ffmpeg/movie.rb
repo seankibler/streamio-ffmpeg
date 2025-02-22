@@ -17,9 +17,13 @@ module FFMPEG
       @path = path
 
       if remote?
-        @head = head
-        unless @head.is_a?(Net::HTTPSuccess)
-          raise Errno::ENOENT, "the URL '#{path}' does not exist or is not available (response code: #{@head.code})"
+        # Bypass HEAD check on AWS Presigned URLs because they are only signed for
+        # GET requests and will always fail with a 403
+        unless aws_presigned_url?
+          @head = head
+          unless @head.is_a?(Net::HTTPSuccess)
+            raise Errno::ENOENT, "the URL '#{path}' does not exist or is not available (response code: #{@head.code})"
+          end
         end
       else
         raise Errno::ENOENT, "the file '#{path}' does not exist" unless File.exist?(path)
@@ -151,6 +155,10 @@ module FFMPEG
       @path =~ URI::regexp(%w(http https))
     end
 
+    def aws_presigned_url?
+      @path.match?(/X-Amz-Expires/)
+    end
+
     def local?
       not remote?
     end
@@ -181,6 +189,10 @@ module FFMPEG
       if local?
         File.size(@path)
       else
+        if aws_presigned_url?
+          raise FFMPEG::Error, "Unable to get content length of AWS Presigned URLs"
+        end
+
         @head.content_length
       end
     end
